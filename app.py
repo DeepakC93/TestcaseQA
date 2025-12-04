@@ -1,56 +1,60 @@
 import json
-from tabulate import tabulate
+import streamlit as st
 
-def compare_events(android_json, ios_json):
-    # Convert JSON strings → dict
-    android = json.loads(android_json)
-    ios = json.loads(ios_json)
+st.title("Event Comparison Tool (Android vs iOS)")
 
-    # Get all unique keys across both
-    all_keys = set(android.keys()) | set(ios.keys())
+# ----------- INPUT SECTION ---------------------------------
+st.subheader("Paste Android Event JSON")
+android_raw = st.text_area("Android JSON", height=200)
 
+st.subheader("Paste iOS Event JSON")
+ios_raw = st.text_area("iOS JSON", height=200)
+
+if st.button("Compare Events"):
+    try:
+        android = json.loads(android_raw)
+        ios = json.loads(ios_raw)
+    except Exception as e:
+        st.error("Invalid JSON input")
+        st.stop()
+
+    # -------------------------------------------------------
+    # Collect all keys from both platforms
+    all_keys = sorted(set(list(android.keys()) + list(ios.keys())))
+
+    # -------------------------------------------------------
+    # Prepare table header
     rows = []
-    for key in sorted(all_keys):
-        a_val = android.get(key, "-")
-        i_val = ios.get(key, "-")
-        match = "✓" if a_val == i_val else "✗"
-        rows.append([key, a_val, i_val, match])
+    header = ["Field", "Android Value", "iOS Value", "Match?"]
 
-    print("\n" + tabulate(rows, headers=["Field", "Android", "iOS", "Match"], tablefmt="grid"))
+    for key in all_keys:
+        a_val = android.get(key, "")
+        i_val = ios.get(key, "")
 
+        # Check match
+        if key in android and key in ios:
+            match = "✔" if str(a_val) == str(i_val) else "✘"
+        else:
+            match = "✘"
 
-# ------------------------------
-# EXAMPLE USAGE
-# ------------------------------
+        rows.append([key, str(a_val), str(i_val), match])
 
-android_event = """
-{
-    "app_device_id": "m.174D4E04-4C16-477F-ADF0-BE064B691E65",
-    "build_version": "11702",
-    "course_id": 1,
-    "device_type": "Android",
-    "part_id": "6924548d141112db388ad071",
-    "platform": "Android",
-    "session_id": "68e3433454eb187b6601dc1c",
-    "subject_id": "66a3c9b9189bd8a4b4dcf463",
-    "video_id": "692460c00ededf7363e6594d",
-    "video_type": "general"
-}
-"""
+    # -------------------------------------------------------
+    # Render table manually (no tabulate needed)
+    st.subheader("Comparison Table")
 
-ios_event = """
-{
-    "app_device_id": "m.174D4E04-4C16-477F-ADF0-BE064B691E65",
-    "build_version": "11702",
-    "course_id": 1,
-    "device_type": "iPhone",
-    "part_id": "6924548d141112db388ad071",
-    "platform": "iOS",
-    "session_id": "68e3433454eb187b6601dc1c",
-    "subject_id": "66a3c9b9189bd8a4b4dcf463",
-    "video_id": "692460c00ededf7363e6594d",
-    "video_type": "general"
-}
-"""
+    # Build table in Markdown format
+    table_md = "| Field | Android Value | iOS Value | Match |\n"
+    table_md += "|-------|---------------|-----------|--------|\n"
 
-compare_events(android_event, ios_event)
+    for r in rows:
+        table_md += f"| {r[0]} | {r[1]} | {r[2]} | {r[3]} |\n"
+
+    st.markdown(table_md)
+
+    # Summary
+    total = len(rows)
+    matches = sum(1 for r in rows if r[3] == "✔")
+
+    st.success(f"Matched: {matches}/{total} fields")
+
