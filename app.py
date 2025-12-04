@@ -1,75 +1,103 @@
 import streamlit as st
 import json
-import pandas as pd
 
-st.title("Event Comparison (Android vs iOS)")
+st.title("Event Comparison Tool (Android vs iOS)")
 
-st.write("Paste the JSON for Android and iOS events.")
+st.write("Paste Android & iOS event JSON below:")
 
-android_input = st.text_area("Android JSON", height=200)
-ios_input = st.text_area("iOS JSON", height=200)
+android_json = st.text_area("Android JSON")
+ios_json = st.text_area("iOS JSON")
 
-def check_field(data, field):
-    return field in data and data[field] not in [None, "", {}]
-
-def check_part_started(data):
-    return check_field(data, "part_id") and check_field(data, "part_type")
-
-def check_part_ended(data):
-    return check_field(data, "part_status") and data.get("part_status") == "ended"
-
-def check_live_waiting(data):
-    return check_field(data, "live_status") and data.get("live_status") == "waiting"
-
-def check_video_play(data):
-    return check_field(data, "video_id") and check_field(data, "video_type")
-
-def check_video_playback(data):
-    return check_field(data, "playback_duration")
-
-def tick(val):
-    return "✔" if val else "❌"
-
-if st.button("Compare"):
+# ---------- Utility to safely load JSON ----------
+def load_json(text):
     try:
-        android_json = json.loads(android_input) if android_input.strip() else {}
-        ios_json = json.loads(ios_input) if ios_input.strip() else {}
+        return json.loads(text)
     except:
-        st.error("Invalid JSON format. Please check your input.")
-        st.stop()
+        return {}
 
-    results = [
-        {
-            "Event": "Part Started",
-            "Android": tick(check_part_started(android_json)),
-            "iOS": tick(check_part_started(ios_json)),
-            "Notes": "part_type: live / test / general"
-        },
-        {
-            "Event": "Part Ended",
-            "Android": tick(check_part_ended(android_json)),
-            "iOS": tick(check_part_ended(ios_json)),
-            "Notes": "part_status: ended"
-        },
-        {
-            "Event": "Live Waiting Status",
-            "Android": tick(check_live_waiting(android_json)),
-            "iOS": tick(check_live_waiting(ios_json)),
-            "Notes": "live_status: waiting"
-        },
-        {
-            "Event": "Video Play Event",
-            "Android": tick(check_video_play(android_json)),
-            "iOS": tick(check_video_play(ios_json)),
-            "Notes": "video_type, video_id"
-        },
-        {
-            "Event": "Video Playback Duration",
-            "Android": tick(check_video_playback(android_json)),
-            "iOS": tick(check_video_playback(ios_json)),
-            "Notes": "playback_duration event sent"
-        }
+# ---------- Comparison Logic ----------
+def check_event(event_name, android_dict, ios_dict, keys):
+    android_match = all(k in android_dict for k in keys)
+    ios_match = all(k in ios_dict for k in keys)
+
+    return {
+        "Event": event_name,
+        "Android": "✔" if android_match else "✖",
+        "iOS": "✔" if ios_match else "✖",
+    }
+
+
+if st.button("Compare Events"):
+
+    # Load JSON safely
+    android_data = load_json(android_json)
+    ios_data = load_json(ios_json)
+
+    # Event definitions
+    comparisons = [
+        check_event(
+            "Part Started",
+            android_data,
+            ios_data,
+            ["part_id", "part_type"]
+        ),
+        check_event(
+            "Part Ended",
+            android_data,
+            ios_data,
+            ["part_status"]
+        ),
+        check_event(
+            "Live Waiting Status",
+            android_data,
+            ios_data,
+            ["live_status"]
+        ),
+        check_event(
+            "Video Play Event",
+            android_data,
+            ios_data,
+            ["video_type", "video_id"]
+        ),
+        check_event(
+            "Video Playback Duration",
+            android_data,
+            ios_data,
+            ["playback_duration"]
+        ),
     ]
 
-    df = pd.DataFrame(results)
-    st.subheader("✅ Par
+    # Display section header
+    st.subheader("✅ Part-Level Events (Covered)")
+
+    # Build final table with Notes
+    table_rows = []
+    for row in comparisons:
+        notes = ""
+        if row["Event"] == "Part Started":
+            notes = "part_type: live / test / general"
+        elif row["Event"] == "Part Ended":
+            notes = "part_status: ended"
+        elif row["Event"] == "Live Waiting Status":
+            notes = "live_status: waiting"
+        elif row["Event"] == "Video Play Event":
+            notes = "video_type, video_id"
+        elif row["Event"] == "Video Playback Duration":
+            notes = "playback_duration event sent"
+
+        table_rows.append([
+            row["Event"],
+            row["Android"],
+            row["iOS"],
+            notes
+        ])
+
+    # Render table in Streamlit
+    st.table(
+        {
+            "Event": [r[0] for r in table_rows],
+            "Android": [r[1] for r in table_rows],
+            "iOS": [r[2] for r in table_rows],
+            "Notes": [r[3] for r in table_rows],
+        }
+    )
