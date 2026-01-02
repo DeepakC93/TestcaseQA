@@ -98,12 +98,22 @@ def extract_text_from_docx(file) -> str:
 
 def generate_test_cases(prd_text: str) -> List[Dict[str, Any]]:
     """Generate test cases using Gemini API"""
-    api_key = st.secrets.get("GEMINI_API_KEY") or os.getenv("GEMINI_API_KEY")
+    api_key = None
+    try:
+        api_key = st.secrets.get("GEMINI_API_KEY")
+    except:
+        pass
     
     if not api_key:
-        raise Exception("GEMINI_API_KEY not found. Please set it in Streamlit secrets or environment variables.")
+        api_key = os.getenv("GEMINI_API_KEY")
     
-    genai.configure(api_key=api_key)
+    if not api_key:
+        raise Exception("GEMINI_API_KEY not found. Please enter your API key in the sidebar or set it as an environment variable.")
+    
+    try:
+        genai.configure(api_key=api_key)
+    except Exception as e:
+        raise Exception(f"Failed to configure Gemini API: {str(e)}")
     
     # Try different models
     models_to_try = ['gemini-2.5-flash', 'gemini-2.5-pro', 'gemini-pro']
@@ -113,19 +123,46 @@ def generate_test_cases(prd_text: str) -> List[Dict[str, Any]]:
     last_error = None
     for model_name in models_to_try:
         try:
+            st.info(f"🔄 Trying model: {model_name}...")
             model = genai.GenerativeModel(model_name)
-            response = model.generate_content(prompt)
+            
+            # Add generation config for better reliability
+            generation_config = {
+                "temperature": 0.7,
+                "top_p": 0.95,
+                "top_k": 40,
+                "max_output_tokens": 8192,
+            }
+            
+            response = model.generate_content(
+                prompt,
+                generation_config=generation_config
+            )
+            
+            if not response or not response.text:
+                raise Exception("Empty response from Gemini API")
+            
             response_text = response.text
+            st.info("✅ Response received, parsing JSON...")
             
             # Parse JSON from response
             json_match = re.search(r'\[[\s\S]*\]', response_text)
             if json_match:
                 test_cases = json.loads(json_match.group())
             else:
+                # Try to find JSON in the response
                 test_cases = json.loads(response_text)
             
+            if not test_cases or not isinstance(test_cases, list):
+                raise Exception("Invalid response format from AI")
+            
             return test_cases
+        except json.JSONDecodeError as e:
+            st.warning(f"⚠️ JSON parsing error with {model_name}, trying next model...")
+            last_error = f"JSON parsing error: {str(e)}. Response preview: {response_text[:200] if 'response_text' in locals() else 'N/A'}"
+            continue
         except Exception as e:
+            st.warning(f"⚠️ Error with {model_name}: {str(e)[:100]}")
             last_error = e
             continue
     
@@ -214,30 +251,58 @@ uploaded_file = st.file_uploader(
 
 if uploaded_file is not None:
     if st.button("Generate Test Cases", type="primary", use_container_width=True):
-        with st.spinner("Processing your PRD and generating test cases..."):
-            try:
-                # Step 1: Extract text from DOCX
-                prd_text = extract_text_from_docx(uploaded_file)
-                
-                if not prd_text or not prd_text.strip():
-                    st.error("The document appears to be empty or could not be read")
-                    st.stop()
-                
-                st.session_state.prd_file_name = uploaded_file.name
-                
-                # Step 2: Generate test cases
-                test_case_groups = generate_test_cases(prd_text)
-                
-                # Step 3: Ensure all categories are present
-                test_case_groups = ensure_all_categories(test_case_groups)
-                
-                st.session_state.test_case_groups = test_case_groups
-                
-                st.success("✅ Test cases generated successfully!")
-                
-            except Exception as e:
-                st.error(f"Error: {str(e)}")
+        progress_bar = st.progress(0)
+        status_text = st.empty()
+        
+        try:
+            # Step 1: Extract text from DOCX
+            status_text.text("📄 Step 1/3: Extracting text from DOCX file...")
+            progress_bar.progress(10)
+            
+            prd_text = extract_text_from_docx(uploaded_file)
+            
+            if not prd_text or not prd_text.strip():
+                st.error("The document appears to be empty or could not be read")
                 st.stop()
+            
+            st.session_state.prd_file_name = uploaded_file.name
+            progress_bar.progress(30)
+            
+            # Step 2: Generate test cases
+            status_text.text("🤖 Step 2/3: Generating test cases with AI (this may take 30-60 seconds)...")
+            progress_bar.progress(40)
+            
+            test_case_groups = generate_test_cases(prd_text)
+            progress_bar.progress(80)
+            
+            # Step 3: Ensure all categories are present
+            status_text.text("📋 Step 3/3: Organizing test cases by category...")
+            test_case_groups = ensure_all_categories(test_case_groups)
+            
+            st.session_state.test_case_groups = test_case_groups
+            progress_bar.progress(100)
+            status_text.empty()
+            progress_bar.empty()
+            
+            st.success("✅ Test cases generated successfully!")
+            
+        except Exception as e:
+            progress_bar.empty()
+            status_text.empty()
+            error_msg = str(e)
+            st.error(f"❌ Error: {error_msg}")
+            
+            # Provide helpful troubleshooting
+            if "GEMINI_API_KEY" in error_msg:
+                st.info("💡 **Tip:** Make sure you've entered your Gemini API key in the sidebar. Get a free key from: https://makersuite.google.com/app/apikey")
+            elif "JSON" in error_msg or "parsing" in error_msg.lower():
+                st.warning("⚠️ The AI response couldn't be parsed. This might be a temporary issue. Please try again.")
+            elif "quota" in error_msg.lower() or "rate limit" in error_msg.lower():
+                st.info("💡 **Tip:** You may have exceeded your API quota. Please check your Gemini API account or try again later.")
+            else:
+                st.info("💡 **Tip:** Check your internet connection and API key. If the problem persists, try uploading a smaller PRD file.")
+            
+            st.stop()
 
 # Display test cases
 if st.session_state.test_case_groups:
